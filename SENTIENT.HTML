@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentient头像外框生成器</title>
+    <!-- 引入 Tailwind CSS --><script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 隐藏默认的文件上传按钮 */
+        input[type="file"] {
+            display: none;
+        }
+        /* 自定义Inter字体，使页面更好看 */
+        body {
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+        }
+        /* 新增：控制按钮统一样式 */
+        .control-btn {
+            background-color: #4B5563; /* bg-gray-600 */
+            color: white;
+            font-weight: 700;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem; /* rounded-lg */
+            transition: background-color 0.2s ease-in-out;
+            border: none;
+            cursor: pointer;
+        }
+        .control-btn:hover {
+            background-color: #6B7280; /* bg-gray-500 */
+        }
+        .control-btn:disabled {
+            background-color: #374151; /* bg-gray-700 */
+            color: #9CA3AF; /* text-gray-400 */
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<!-- 
+  修改：
+  bg-gray-900 替换为 渐变背景
+  bg-gradient-to-br：从左上角到右下角的渐变
+  from-purple-900：起始颜色 (深紫色)
+  via-pink-800：中间颜色 (深粉色)
+  to-red-900：结束颜色 (深红色)
+--><body class="bg-gradient-to-br from-purple-900 via-pink-800 to-red-900 text-white min-h-screen flex items-center justify-center p-4">
+
+    <!-- 
+      修改：
+      1. max-w-md 改为 max-w-4xl，使其更宽。
+      2. 添加 grid grid-cols-1 md:grid-cols-2 gap-8 
+         - 移动端 (默认) 保持1列
+         - 桌面端 (md:) 变为2列
+         - gap-8 增加列间距
+    --><div class="bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-2xl max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 gap-8">
+        
+        <!-- 第 1 列：画布预览 --><div class="w-full flex items-center justify-center">
+            <!-- 预览画布 (移除了 mb-6) --><canvas id="previewCanvas" width="512" height="512" class="w-full aspect-square rounded-full overflow-hidden bg-gray-700 border-2 border-gray-600"></canvas>
+        </div>
+
+        <!-- 第 2 列：控制区域 --><!-- 使用 flex flex-col 和 space-y-4 来管理内部元素的垂直间距 --><div class="flex flex-col justify-center space-y-4">
+            
+            <h1 class="text-2xl sm:text-3xl font-bold text-center text-yellow-400">
+                Sentient头像生成器
+            </h1>
+
+            <!-- 自定义文件上传按钮 --><label for="fileInput" class="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg cursor-pointer transition-colors duration-200">
+                上传头像
+            </label>
+            <input type="file" id="fileInput" accept="image/png, image/jpeg, image/webp">
+
+            <!-- 
+              修改：
+              1. 移除旧的 controlsContainer 
+              2. 添加一个独立的、默认隐藏的重置按钮
+            --><button id="btnReset" class="hidden w-full bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 px-4 rounded-lg cursor-pointer transition-colors duration-200">
+                重置位置和缩放
+            </button>
+
+            <!-- 新增：缩放提示 --><p id="zoomHint" class="hidden text-center text-gray-400 text-sm mt-2">
+                提示：使用鼠标滚轮进行缩放
+            </p>
+
+
+            <!-- 下载按钮 (移除了 mt-4) --><button id="downloadBtn" disabled class="block w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg cursor-pointer transition-colors duration-200 mt-4 disabled:bg-gray-500 disabled:cursor-not-allowed">
+                下载合成图片
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM 元素 ---
+        const canvas = document.getElementById('previewCanvas');
+        const ctx = canvas.getContext('2d');
+        const fileInput = document.getElementById('fileInput');
+        const downloadBtn = document.getElementById('downloadBtn');
+
+        // --- 修改：移除旧的控制元素 ---
+        // 移除了 controlsContainer, btnUp, btnDown, btnLeft, btnRight, btnZoomIn, btnZoomOut
+        
+        // --- 修改：只获取重置按钮 ---
+        const btnReset = document.getElementById('btnReset');
+        // --- 新增：获取提示元素 ---
+        const zoomHint = document.getElementById('zoomHint');
+
+        // --- 常量和状态 ---
+        const CANVAS_SIZE = 512; // 画布的实际分辨率
+            const FRAME_URL = 'https://i.imgur.com/JW9OPHh.png'; // 装饰外圈图片链接
+            
+            const frameImg = new Image();
+            const userImg = new Image();
+            
+            let frameLoaded = false;
+        let userImgLoaded = false;
+
+        // --- 新增：图片变换状态 ---
+        let userImgX = 0;
+        let userImgY = 0;
+        let userImgScale = 1.0;
+        const MOVE_STEP = 10; // 每次移动10px
+        const SCALE_STEP = 0.1; // 每次缩放10%
+
+        // --- 新增：拖动状态 ---
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+
+        // --- 核心函数 ---
+
+            /**
+             * 1. 初始化函数
+             * - 加载外框图片 (必须设置 crossOrigin)
+             */
+            function init() {
+                frameImg.crossOrigin = "Anonymous";
+                frameImg.src = FRAME_URL;
+                
+                frameImg.onload = () => {
+                    frameLoaded = true;
+                    drawCombinedImage(); 
+                };
+
+                frameImg.onerror = () => {
+                    // 绘制失败提示
+                    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+                    ctx.fillStyle = 'red';
+                    ctx.textAlign = 'center';
+                    ctx.font = '24px Inter';
+                    ctx.fillText('外框加载失败', CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+                    console.error('装饰外框图片加载失败。');
+                };
+            }
+
+            // --- 新增：重置图片状态函数 ---
+            /**
+             * 重置图片位置和缩放为 "cover" 状态
+             */
+            function resetImageState() {
+                if (!userImgLoaded || !userImg.width || !userImg.height) {
+                    userImgX = 0;
+                    userImgY = 0;
+                    userImgScale = 1.0;
+                    return;
+                }
+                
+                // 计算 "cover" 状态的初始缩放
+                const hRatio = CANVAS_SIZE / userImg.width;
+                const vRatio = CANVAS_SIZE / userImg.height;
+                userImgScale = Math.max(hRatio, vRatio);
+
+                // 计算 "cover" 状态的初始居中位置
+                userImgX = (CANVAS_SIZE - userImg.width * userImgScale) / 2;
+                userImgY = (CANVAS_SIZE - userImg.height * userImgScale) / 2;
+            }
+
+
+            /**
+             * 2. 绘制用户图片 (原 drawUserImageCover)
+             * - 现在根据全局状态 (X, Y, Scale) 绘制
+             */
+            function drawUserImageTransformed(img) {
+                // 不再计算, 而是直接使用全局状态
+                ctx.drawImage(
+                    img, 
+                    0, 0, img.width, img.height, 
+                    userImgX, userImgY, // 使用状态
+                    img.width * userImgScale, img.height * userImgScale // 使用状态
+                );
+            }
+
+            /**
+             * 3. 绘制最终合成的图像，并进行圆形裁剪
+             */
+            function drawCombinedImage() {
+                ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+                // --- 开始圆形裁剪路径 ---
+                ctx.save(); // 保存当前画布状态
+                ctx.beginPath();
+                ctx.arc(CANVAS_SIZE / 2, CANVAS_SIZE / 2, CANVAS_SIZE / 2, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.clip(); // 应用裁剪路径，后续绘制只会在圆形区域内
+
+                // 绘制背景色 (圆形内部)
+                ctx.fillStyle = '#4B5563'; 
+                ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+                if (userImgLoaded) {
+                    // 如果用户图片已加载，绘制用户图片 (函数名已改)
+                    drawUserImageTransformed(userImg);
+                } else {
+                    // 如果用户图片未加载，绘制一个占位符
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                    ctx.textAlign = 'center';
+                    ctx.font = '28px Inter';
+                    ctx.fillText('上传头像', CANVAS_SIZE / 2, CANVAS_SIZE / 2 - 15);
+                    ctx.font = '18px Inter';
+                    ctx.fillText('以预览效果', CANVAS_SIZE / 2, CANVAS_SIZE / 2 + 20);
+                }
+
+                ctx.restore(); // 恢复画布状态，取消圆形裁剪，以便绘制外框
+
+                // 绘制装饰外框 (顶层，不受之前裁剪影响)
+                if (frameLoaded) {
+                    ctx.drawImage(frameImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+                }
+            }
+
+
+            // --- 事件监听 ---
+
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file && file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+
+                    reader.onload = (event) => {
+                        userImg.src = event.target.result;
+                        
+                        userImg.onload = () => {
+                            userImgLoaded = true;
+                            resetImageState(); // 在此重置状态
+                            drawCombinedImage();
+                            downloadBtn.disabled = false;
+                            // 修改：显示独立的重置按钮和提示
+                            btnReset.classList.remove('hidden'); 
+                            zoomHint.classList.remove('hidden'); // 显示提示
+                            canvas.style.cursor = 'grab'; // 添加拖动手势
+                        };
+
+                        userImg.onerror = () => {
+                            userImgLoaded = false;
+                            drawCombinedImage(); 
+                            downloadBtn.disabled = true;
+                            // 修改：隐藏独立的重置按钮和提示
+                            btnReset.classList.add('hidden'); 
+                            zoomHint.classList.add('hidden'); // 隐藏提示
+                            canvas.style.cursor = 'default';
+                            console.error('用户头像加载失败，请尝试其他图片。');
+                        };
+                    };
+
+                    reader.readAsDataURL(file);
+                } else {
+                    userImgLoaded = false;
+                    userImg.src = ''; 
+                    drawCombinedImage(); 
+                    downloadBtn.disabled = true;
+                    // 修改：隐藏独立的重置按钮和提示
+                    btnReset.classList.add('hidden'); 
+                    zoomHint.classList.add('hidden'); // 隐藏提示
+                    canvas.style.cursor = 'default';
+                }
+            });
+
+            downloadBtn.addEventListener('click', () => {
+                if (!userImgLoaded) {
+                    console.warn('请先上传您的头像！');
+                    return;
+                }
+
+                // 创建一个临时的画布进行圆形裁剪，确保下载的是裁剪后的圆形图片
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = CANVAS_SIZE;
+                tempCanvas.height = CANVAS_SIZE;
+                const tempCtx = tempCanvas.getContext('2d');
+
+                // --- 修复：保存状态，以便后续恢复 ---
+                tempCtx.save();
+
+                // 再次进行圆形裁剪
+                tempCtx.beginPath();
+                tempCtx.arc(CANVAS_SIZE / 2, CANVAS_SIZE / 2, CANVAS_SIZE / 2, 0, Math.PI * 2, true);
+                tempCtx.closePath();
+                tempCtx.clip();
+
+                // 绘制用户图片 (使用全局状态，替换旧的计算)
+                tempCtx.drawImage(
+                    userImg, 
+                    0, 0, userImg.width, userImg.height, 
+                    userImgX, userImgY, 
+                    userImg.width * userImgScale, userImg.height * userImgScale
+                );
+
+                // --- 修复：恢复状态，移除裁剪 ---
+                // 这样外框就不会被裁剪
+                tempCtx.restore();
+
+                // 绘制外框 (在外框图像本身就是圆形透明背景的情况下，它将覆盖边缘)
+                if (frameLoaded) {
+                    tempCtx.drawImage(frameImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+                }
+
+                const dataURL = tempCanvas.toDataURL('image/png');
+                const link = document.createElement('a');
+                link.href = dataURL;
+                link.download = 'circular-avatar-with-frame.png';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            });
+
+            // --- 移除：旧的控制按钮事件监听 ---
+            // 移除了 btnUp, btnDown, btnLeft, btnRight, btnZoomIn, btnZoomOut 的监听器
+
+            // --- 保留：重置按钮监听 ---
+            btnReset.addEventListener('click', () => {
+                resetImageState();
+                drawCombinedImage();
+            });
+
+            // --- 新增：鼠标/触摸拖动和滚轮缩放的事件监听 ---
+
+            // 获取相对于 canvas 的鼠标位置
+            function getMousePos(canvasEl, evt) {
+                const rect = canvasEl.getBoundingClientRect();
+                return {
+                    x: evt.clientX - rect.left,
+                    y: evt.clientY - rect.top
+                };
+            }
+
+            // 获取相对于 canvas 的触摸位置
+            function getTouchPos(canvasEl, evt) {
+                const rect = canvasEl.getBoundingClientRect();
+                return {
+                    x: evt.touches[0].clientX - rect.left,
+                    y: evt.touches[0].clientY - rect.top
+                };
+            }
+
+            // --- 1. 鼠标拖动 (Mouse Drag) ---
+            canvas.addEventListener('mousedown', (e) => {
+                if (!userImgLoaded) return;
+                isDragging = true;
+                const pos = getMousePos(canvas, e);
+                lastMouseX = pos.x;
+                lastMouseY = pos.y;
+                canvas.style.cursor = 'grabbing'; // 更改光标
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging || !userImgLoaded) return;
+                
+                const pos = getMousePos(canvas, e);
+                const deltaX = pos.x - lastMouseX;
+                const deltaY = pos.y - lastMouseY;
+                
+                userImgX += deltaX;
+                userImgY += deltaY;
+                
+                lastMouseX = pos.x;
+                lastMouseY = pos.y;
+                
+                drawCombinedImage();
+            });
+
+            canvas.addEventListener('mouseup', () => {
+                isDragging = false;
+                canvas.style.cursor = 'grab'; // 恢复光标
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                isDragging = false;
+                canvas.style.cursor = 'grab'; // 恢复光标
+            });
+
+            // --- 2. 触摸拖动 (Touch Drag) ---
+            canvas.addEventListener('touchstart', (e) => {
+                if (!userImgLoaded || e.touches.length !== 1) return;
+                e.preventDefault(); // 阻止页面滚动
+                isDragging = true;
+                const pos = getTouchPos(canvas, e);
+                lastMouseX = pos.x;
+                lastMouseY = pos.y;
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if (!isDragging || !userImgLoaded || e.touches.length !== 1) return;
+                e.preventDefault(); // 阻止页面滚动
+                
+                const pos = getTouchPos(canvas, e);
+                const deltaX = pos.x - lastMouseX;
+                const deltaY = pos.y - lastMouseY;
+                
+                userImgX += deltaX;
+                userImgY += deltaY;
+                
+                lastMouseX = pos.x;
+                lastMouseY = pos.y;
+                
+                drawCombinedImage();
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+
+            // --- 3. 滚轮缩放 (Wheel Zoom) ---
+            canvas.addEventListener('wheel', (e) => {
+                if (!userImgLoaded) return;
+                e.preventDefault(); // 阻止页面滚动
+
+                const scaleAmount = e.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
+                const newScale = Math.max(0.1, userImgScale + scaleAmount);
+
+                // 获取鼠标相对于 canvas 的位置
+                const pos = getMousePos(canvas, e);
+
+                // 计算鼠标指向的"世界"坐标 (图片上的点)
+                const worldX = (pos.x - userImgX) / userImgScale;
+                const worldY = (pos.y - userImgY) / userImgScale;
+
+                // 更新缩放
+                userImgScale = newScale;
+
+                // 更新图片位置，使"世界"坐标点保持在鼠标下方
+                userImgX = pos.x - (worldX * userImgScale);
+                userImgY = pos.y - (worldY * userImgScale);
+
+                drawCombinedImage();
+            }, { passive: false });
+
+
+            // --- 启动应用 ---
+            init();
+        });
+    </script>
+</body>
+</html>
